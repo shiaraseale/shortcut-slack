@@ -1,7 +1,7 @@
 function postShortcutStatsToSlack() {
   // Shortcut API, Slack webhook, and Google Sheet details
-  const shortcutApiKey = 'XXX';
-  const slackWebhookUrl = 'XXX';
+  const shortcutApiKey = 'YOUR_SHORTCUT_API_KEY_HERE'; // Replace with your actual Shortcut API Key
+  const slackWebhookUrl = 'YOUR_SLACK_WEBHOOK_URL_HERE'; // Replace with your actual Slack Webhook URL
 
   // API base URLs
   const iterationsApiUrl = 'https://api.app.shortcut.com/api/v3/iterations';
