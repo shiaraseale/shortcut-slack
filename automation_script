@@ -1,0 +1,135 @@
+function postShortcutStatsToSlack() {
+  // Shortcut API, Slack webhook, and Google Sheet details
+  const shortcutApiKey = 'XXX';
+  const slackWebhookUrl = 'XXX';
+
+  // API base URLs
+  const iterationsApiUrl = 'https://api.app.shortcut.com/api/v3/iterations';
+  const workflowsApiUrl = 'https://api.app.shortcut.com/api/v3/workflows';
+  const membersApiUrl = 'https://api.app.shortcut.com/api/v3/members';
+
+  // Parameters to access the API
+  const params = {
+    'headers': {
+      'Content-Type': 'application/json',
+      'Shortcut-Token': shortcutApiKey
+    }
+  }
+
+  // Fetch all iterations from Shortcut
+  let request = iterationsApiUrl;
+  let response = UrlFetchApp.fetch(request, params);
+  let iterations = JSON.parse(response.getContentText());
+
+  // Fetch all workflows from Shortcut
+  request = workflowsApiUrl;
+  response = UrlFetchApp.fetch(request, params);
+  const workflows = JSON.parse(response.getContentText());
+
+  // Fetch all members from Shortcut
+  request = membersApiUrl;
+  response = UrlFetchApp.fetch(request, params);
+  const members = JSON.parse(response.getContentText());
+
+  // Filter for active iterations
+  const activeIterations = iterations.filter(iteration => iteration.status === 'started');
+
+  // Declare slackMessage outside the loop
+  let slackMessage = "*Active Iteration Stats:*\n\n"; 
+
+  // Fetch and process stories for each active iteration using IDs
+  activeIterations.forEach(iteration => {
+    // Construct the URL to fetch stories for the current iteration using the ID
+    const storiesUrl = `${iterationsApiUrl}/${iteration.id}/stories`;
+
+    // Fetch stories for the current iteration
+    response = UrlFetchApp.fetch(storiesUrl, params);
+    let stories = JSON.parse(response.getContentText());
+
+    // Filter out archived stories
+    const activeStories = stories.filter(story => !story.archived);
+
+    // Extract relevant information (owner, points, state type) for each story
+    const extractedStories = activeStories.map(story => {
+      // Find the workflow state type
+      let stateType = null;
+      for (const workflow of workflows) {
+        const state = workflow.states.find(state => state.id === story.workflow_state_id);
+        if (state) {
+          stateType = state.type;
+          break;
+        }
+      }
+
+      // Find the owner's name using the owner_ids
+      let ownerName = null;
+      if (story.owner_ids.length > 0) {
+        const owner = members.find(member => member.id === story.owner_ids[0]);
+        if (owner) {
+          ownerName = owner.profile.name;
+        }
+      }
+
+      return {
+        owner: ownerName || "unassigned",
+        points: story.estimate,
+        state_type: stateType
+      };
+    });
+
+
+    // Concatenate iteration stats to slackMessage
+    slackMessage += `*${iteration.name}*\n`;
+    slackMessage += `  Backlog: ${iteration.stats.num_points_backlog} | To do: ${iteration.stats.num_points_unstarted} | Doing: ${iteration.stats.num_points_started} | Done: ${iteration.stats.num_points_done} | Total: ${iteration.stats.num_points}\n\n`;
+
+    // Add story details (owner, points, state type)
+    slackMessage += "  *Members:* _(please note: a story may be assigned to more than one member, resulting in points being counted more than once)_\n";
+    const storiesWithStateType = extractedStories.filter(story => story.state_type !== null);
+
+    // Group stories by owner
+    const groupedStories = storiesWithStateType.reduce((acc, story) => {
+      const owner = story.owner;
+      acc[owner] = (acc[owner] || []).concat(story);
+      return acc;
+    }, {});
+
+    // Get all unique state types
+    const allStateTypes = [...new Set(workflows.flatMap(workflow => workflow.states.map(state => state.type)))];
+
+    // Calculate and display points per state type for each owner
+    for (const owner in groupedStories) {
+      slackMessage += `    -*${owner}*\n`;
+
+      // Calculate points for each state type (including those with 0 points)
+      const pointsPerState = allStateTypes.reduce((acc, stateType) => {
+        acc[stateType] = groupedStories[owner].reduce((sum, story) => 
+          story.state_type === stateType ? sum + story.points : sum, 0);
+        return acc;
+      }, {});
+
+      // Construct the state type summary string dynamically
+      let stateTypeSummary = "";
+      for (const stateType in pointsPerState) {
+        stateTypeSummary += `${stateType}: ${pointsPerState[stateType]} | `;
+      }
+      stateTypeSummary += `Total: ${groupedStories[owner].reduce((sum, story) => sum + story.points, 0)}`;
+
+      // Display points per state type using dynamic state type values
+      slackMessage += `      ${stateTypeSummary}\n\n`;
+    }
+
+    slackMessage += " ----- \n\n";
+  });
+
+  // Options for posting to Slack
+  const slackOptions = {
+    'method': 'post',
+    'contentType': 'application/json',
+    'payload': JSON.stringify({ text: slackMessage })
+  };
+
+  // Post the message to Slack
+  UrlFetchApp.fetch(slackWebhookUrl, slackOptions);
+
+  //console.log(slackMessage);
+}
